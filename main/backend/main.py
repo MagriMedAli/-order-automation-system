@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 class Customer(BaseModel):
     name: str
     email: str
-
+    phone: str
 
 class OrderItemCreate(BaseModel):
     product_id: int
@@ -75,7 +75,7 @@ def get_customers():
         with conn.cursor() as cursor:
 
             cursor.execute("""
-                SELECT id, name, email
+                SELECT id, name, email , phone
                 FROM customers
                 ORDER BY id;
             """)
@@ -88,7 +88,8 @@ def get_customers():
         customers.append({
             "id": row[0],
             "name": row[1],
-            "email": row[2]
+            "email": row[2],
+            "phone": row[3] 
         })
 
     return customers
@@ -127,6 +128,39 @@ def get_products():
 # =========================
 # Get customer's orders
 # =========================
+@app.get("/customers/by-phone/{phone}")
+def get_customer_by_phone(phone: str):
+
+    with psycopg.connect(
+        host=os.getenv("DB_HOST"),
+        dbname=os.getenv("DB_NAME"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD"),
+        port=os.getenv("DB_PORT")
+    ) as conn:
+
+        with conn.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT id, name, email, phone
+                FROM customers
+                WHERE phone = %s;
+            """, (phone,))
+
+            row = cursor.fetchone()
+
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Customer not found"
+        )
+
+    return {
+        "id": row[0],
+        "name": row[1],
+        "email": row[2],
+        "phone": row[3]
+    }
 
 @app.get("/customers/{customer_id}/orders")
 def get_customer_orders(customer_id: int):
@@ -195,10 +229,10 @@ def create_customer(customer: Customer):
         with conn.cursor() as cursor:
 
             cursor.execute("""
-                INSERT INTO customers (name, email)
-                VALUES (%s, %s)
+                INSERT INTO customers (name, email, phone)
+                VALUES (%s, %s, %s)
                 RETURNING id;
-            """, (customer.name, customer.email))
+            """, (customer.name, customer.email, customer.phone))
 
             customer_id = cursor.fetchone()[0]
 
@@ -208,7 +242,8 @@ def create_customer(customer: Customer):
         "message": "Customer created",
         "id": customer_id,
         "name": customer.name,
-        "email": customer.email
+        "email": customer.email,
+        "phone": customer.phone
     }
 
 
