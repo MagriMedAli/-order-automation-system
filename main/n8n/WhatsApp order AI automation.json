@@ -1,0 +1,645 @@
+{
+  "name": "WhatsApp order AI automation",
+  "nodes": [
+    {
+      "parameters": {
+        "multipleMethods": true,
+        "path": "whatsapp-verify",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -128,
+        -16
+      ],
+      "id": "b41d73a4-616f-4404-ae65-e57945680e84",
+      "name": "Webhook",
+      "webhookId": "339dec80-3049-455f-8b64-87a95cb609e1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "52916b21-668a-4cda-8135-56f9fff9411f",
+              "leftValue": "={{ $json.query[\"hub.verify_token\"] }}",
+              "rightValue": "whatsapp_order_2026",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        96,
+        -288
+      ],
+      "id": "43abe614-ce35-4d2c-a31c-55c892db98e6",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query[\"hub.challenge\"] }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        336,
+        -304
+      ],
+      "id": "17ade3b9-fa4e-4063-88f1-95c3c493a41e",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawText = $json.content.parts[0].text;\n\nconst cleaned = rawText\n  .replace(/^```json\\s*/i, '')\n  .replace(/^```\\s*/i, '')\n  .replace(/\\s*```$/i, '')\n  .trim();\n\nconst data = JSON.parse(cleaned);\n\nreturn [{\n  json: data\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        144
+      ],
+      "id": "0f18d0f8-e2d1-4b90-b2b1-4b6053b81723",
+      "name": "Parse Order JSON"
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8000/products",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        336,
+        -80
+      ],
+      "id": "dbb89dec-cc47-4a8d-906b-7501e0c58820",
+      "name": "Get Products"
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiItems = $json.items;\nconst products = $('Get Products').all().map(item => item.json);\n\nconst items = aiItems.map(ai => {\n  const product = products.find(p =>\n    p.name.toLowerCase() === ai.product_name.toLowerCase()\n  );\n\n  if (!product) {\n    throw new Error(`Product not found: ${ai.product_name}`);\n  }\n\n  return {\n    product_id: product.id,\n    quantity: ai.quantity,\n    unit_price: product.price\n  };\n});\n\nlet phone = $('Extract WhatsApp Message').first().json.phone;\n\nif (phone.startsWith('216')) {\n  phone = phone.slice(3);\n}\n\nreturn [{\n  json: {\n    phone,\n    items\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        128
+      ],
+      "id": "620e220f-9523-431a-abbd-723729bcf442",
+      "name": "Match Products"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/customers/by-phone/{{ $json.phone }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1568,
+        -80
+      ],
+      "id": "6d454be7-fb20-4b98-9be4-a58f88d0a9f4",
+      "name": "Get Customer",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const customer = $json;\n\nconst items = $('Match Products').first().json.items;\n\nreturn [{\n  json: {\n    customer_id: customer.id,\n    items\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        112
+      ],
+      "id": "89f2bafb-e750-4ad7-b2b7-4cdb2dc43613",
+      "name": "Build Order"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/orders",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  customer_id: $json.customer_id,\n  items: $json.items\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2304,
+        112
+      ],
+      "id": "ca4388e8-8140-4072-b6db-319efe3bf727",
+      "name": "Create Order"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v25.0/1289693837568553/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "=Authorization",
+              "value": "Bearer EAAZC1oQ0GLQIBSZAlmBzzuX34jMyZCtuGBemaJODZC5uijZCuC0EsbNR4hcPHkX7g0LsRfWZCW13oFHuPfVVy96QlTZAhtBxehUYy3hmZBXuhQWVi5x1EugmMpOxrVVh29ARW5MqZAbuaJZAbpKITyxZBehGYk6V57fsPwsGgnohJ8Cfs5PQaM1VhKIssnhnsYMur2PjemvFOYYOVJKCDKBvusWesDszvOCGh6ArmmkyFuMgeHnebvZBieZBwA4ZBTB3OmzgTZA0IVmMHt7QkbZC7YqMKDLczQZDZD"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $('Extract WhatsApp Message').first().json.phone }}\",\n  \"type\": \"text\",\n  \"text\": {\n    \"body\": \"Order confirmed! Your order #{{ $json.order_id }} has been created. Total: {{ $json.total }} TND.\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2464,
+        112
+      ],
+      "id": "e9f8f361-eb72-4c48-817a-fdfe91a6a572",
+      "name": "Send WhatsApp Confirmation"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $json.body;\n\nconst message = payload.entry?.[0]?.changes?.[0]?.value?.messages?.[0];\n\nif (!message) {\n  return [{\n    json: {\n      type: \"ignored\",\n      reason: \"No WhatsApp message found\"\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    phone: message.from,\n    message: message.text?.body || \"\",\n    message_id: message.id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        144
+      ],
+      "id": "5f892061-8b95-48cc-b4f7-022fdd5c2ffb",
+      "name": "Extract WhatsApp Message"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3.1-flash-lite",
+          "mode": "list",
+          "cachedResultName": "models/gemini-3.1-flash-lite"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an order assistant for a WhatsApp ordering system.\n\nYour job is to understand the customer's message and determine what they want.\n\nCustomer message:\n{{ $('Extract WhatsApp Message').first().json.message }}\n\nAvailable products:\n{{ JSON.stringify($('Get Products').all().map(item => item.json)) }}\n\nReturn ONLY valid JSON.\nDo NOT use markdown.\nDo NOT include ```json.\nDo NOT add explanations.\n\nReturn EXACTLY this structure:\n\n{\n  \"intent\": \"order\",\n  \"available\": true,\n  \"items\": []\n}\n\nThe \"intent\" field is REQUIRED and must ALWAYS be present.\n\nPossible intents:\n\n1. \"order\"\nUse this when the customer wants to buy/order one or more products.\n\nExample:\n\"I want 2 keyboards and a mouse\"\n\nReturn:\n{\n  \"intent\": \"order\",\n  \"available\": true,\n  \"items\": [\n    {\n      \"product_name\": \"keyboard\",\n      \"quantity\": 2\n    },\n    {\n      \"product_name\": \"mouse\",\n      \"quantity\": 1\n    }\n  ]\n}\n\n2. \"catalog\"\nUse this when the customer asks to see, show, list, or browse the available products.\n\nExamples:\n- \"show me the products\"\n- \"what do you have?\"\n- \"what products are available?\"\n- \"show me your catalog\"\n\nReturn:\n{\n  \"intent\": \"catalog\",\n  \"available\": true,\n  \"items\": []\n}\n\n3. \"unknown\"\nUse this when the message is not an order and is not a request to see the products.\n\nExample:\n\"hello\"\n\nReturn:\n{\n  \"intent\": \"unknown\",\n  \"available\": false,\n  \"items\": []\n}\n\nORDER RULES:\n\n- Check the customer's requested products against the available products list.\n- \"available\" must be true ONLY if ALL requested products exist in the available products list.\n- If even ONE requested product does not exist, \"available\" must be false.\n- Correct obvious spelling mistakes in product names.\n  Example: \"mose\" → \"mouse\", \"keybord\" → \"keyboard\".\n- Do not invent products.\n- Do not invent product IDs.\n- Do not invent prices.\n- If the customer does not specify a quantity, use quantity = 1.\n- Extract every requested product.\n- Keep product names matching the available products when possible.\n- For catalog requests, always use intent = \"catalog\".\n- For normal orders, always use intent = \"order\".\n- For unrelated or unclear messages, use intent = \"unknown\"."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        496,
+        144
+      ],
+      "id": "dab8c573-f45e-4088-a027-5cffa6ecce20",
+      "name": "Extract Order with gemini",
+      "retryOnFail": true,
+      "waitBetweenTries": 1000,
+      "maxTries": 3,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "FnpTD1N24CCPolEv",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "ok",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        32,
+        144
+      ],
+      "id": "d5fb326f-2a5b-4d27-87ff-b606db0b713e",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "251b07f1-3e2d-4cfc-bd94-7ce9fa746af1",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1760,
+        128
+      ],
+      "id": "380417ba-2e69-4248-826a-60fac0e5f536",
+      "name": "Customer exists ?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6f65fcef-e1b0-402c-b869-2af39ed59d28",
+              "leftValue": "={{ $json.available }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1184,
+        144
+      ],
+      "id": "31ad50cf-8531-4565-abe1-e058ee7508f6",
+      "name": "Product exsits ? "
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "34576c21-0bad-4e30-a826-dd664529e3b3",
+              "leftValue": "={{ $json.intent }}",
+              "rightValue": "order",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        992,
+        144
+      ],
+      "id": "1fae2abb-561d-4e57-89e7-1817f68fada6",
+      "name": "Order OR catalogue ? "
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/customers",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": \"WhatsApp Customer\",\n  \"email\": \"{{ $('Extract WhatsApp Message').first().json.phone }}@whatsapp.local\",\n  \"phone\": \"{{ $('Extract WhatsApp Message').first().json.phone }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1920,
+        480
+      ],
+      "id": "e61b783a-0d5b-42b5-8d3c-351caa6821e2",
+      "name": "Create Customer"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v25.0/1289693837568553/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "=Authorization",
+              "value": "Bearer EAAZC1oQ0GLQIBSZAlmBzzuX34jMyZCtuGBemaJODZC5uijZCuC0EsbNR4hcPHkX7g0LsRfWZCW13oFHuPfVVy96QlTZAhtBxehUYy3hmZBXuhQWVi5x1EugmMpOxrVVh29ARW5MqZAbuaJZAbpKITyxZBehGYk6V57fsPwsGgnohJ8Cfs5PQaM1VhKIssnhnsYMur2PjemvFOYYOVJKCDKBvusWesDszvOCGh6ArmmkyFuMgeHnebvZBieZBwA4ZBTB3OmzgTZA0IVmMHt7QkbZC7YqMKDLczQZDZD"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $('Extract WhatsApp Message').first().json.phone }}\",\n  \"type\": \"text\",\n  \"text\": {\n    \"body\": \"Sorry, we don't have one or more of the products you requested.\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1520,
+        448
+      ],
+      "id": "fd6d5a21-3200-4415-a2e9-a853369f2a01",
+      "name": "Send product unvailble"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v25.0/1289693837568553/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "=Authorization",
+              "value": "Bearer EAAZC1oQ0GLQIBSZAlmBzzuX34jMyZCtuGBemaJODZC5uijZCuC0EsbNR4hcPHkX7g0LsRfWZCW13oFHuPfVVy96QlTZAhtBxehUYy3hmZBXuhQWVi5x1EugmMpOxrVVh29ARW5MqZAbuaJZAbpKITyxZBehGYk6V57fsPwsGgnohJ8Cfs5PQaM1VhKIssnhnsYMur2PjemvFOYYOVJKCDKBvusWesDszvOCGh6ArmmkyFuMgeHnebvZBieZBwA4ZBTB3OmzgTZA0IVmMHt7QkbZC7YqMKDLczQZDZD"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  messaging_product: \"whatsapp\",\n  to: $('Extract WhatsApp Message').first().json.phone,\n  type: \"text\",\n  text: {\n    body: \"🛍️ Our Products\\n\\n\" + $('Get Products').all().map(item => `🛍️ ${item.json.name} — ${item.json.price} TND`).join(\"\\n\")\n  }\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1184,
+        448
+      ],
+      "id": "6b888d49-14a0-47e3-9ab7-3951509b0ea8",
+      "name": "Send Product Catalog"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Order JSON": {
+      "main": [
+        [
+          {
+            "node": "Order OR catalogue ? ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Products": {
+      "main": [
+        [
+          {
+            "node": "Extract Order with gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match Products": {
+      "main": [
+        [
+          {
+            "node": "Get Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Customer": {
+      "main": [
+        [
+          {
+            "node": "Customer exists ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Order": {
+      "main": [
+        [
+          {
+            "node": "Create Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Order": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract WhatsApp Message": {
+      "main": [
+        [
+          {
+            "node": "Get Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Order with gemini": {
+      "main": [
+        [
+          {
+            "node": "Parse Order JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Extract WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Customer exists ?": {
+      "main": [
+        [
+          {
+            "node": "Build Order",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Product exsits ? ": {
+      "main": [
+        [
+          {
+            "node": "Match Products",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send product unvailble",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Order OR catalogue ? ": {
+      "main": [
+        [
+          {
+            "node": "Product exsits ? ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Product Catalog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Customer": {
+      "main": [
+        [
+          {
+            "node": "Build Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "73db9f58-9d28-4d29-9ed7-e7a245643598",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d473a54e93f2446bd7abfdf82a3fff8f4795946abcb6fcc2842db867c0a7f084"
+  },
+  "nodeGroups": [],
+  "id": "VBxEzG8LIWyFJ1or",
+  "tags": []
+}
